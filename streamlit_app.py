@@ -1,9 +1,10 @@
 import streamlit as st
 import pandas as pd
 import time
+import os
 
 # ============================================
-# Utilitários
+# Funções auxiliares
 # ============================================
 def format_seconds(seconds: float) -> str:
     if seconds is None:
@@ -18,8 +19,16 @@ def pad3(n: int) -> str:
     return f"{n:03d}"
 
 
+def salvar_csv():
+    if st.session_state.tempos:
+        df = pd.DataFrame(st.session_state.alunos)
+        df["Tempo (s)"] = df["Número"].map(st.session_state.tempos)
+        df = df.dropna().sort_values(by="Tempo (s)")
+        df["Tempo"] = df["Tempo (s)"].apply(format_seconds)
+        df.to_csv("resultados_corre_nicea.csv", index=False, encoding="utf-8")
+
 # ============================================
-# Estados da Aplicação (com defaults persistentes)
+# Configuração inicial e persistência
 # ============================================
 st.set_page_config(page_title="1º CORRE NICÉA", layout="centered")
 
@@ -53,6 +62,7 @@ if menu == "Cadastro":
             "Nome": nome.strip(),
             "Turma": turma.strip()
         })
+        salvar_csv()
         st.success(f"Aluno {nome} cadastrado com número {numero}!")
 
     if st.session_state.alunos:
@@ -77,10 +87,17 @@ elif menu == "Cronômetro":
             st.session_state.start_time = None
             st.session_state.running = False
             st.session_state.tempos = {}
+            st.session_state.alunos = []
+            if os.path.exists("resultados_corre_nicea.csv"):
+                os.remove("resultados_corre_nicea.csv")
 
     if st.session_state.start_time:
-        elapsed = time.time() - st.session_state.start_time if st.session_state.running else st.session_state.tempos.get("_ultimo_tempo", 0)
-        st.metric("Tempo Correndo", format_seconds(elapsed))
+        if st.session_state.running:
+            elapsed = time.time() - st.session_state.start_time
+            st.metric("Tempo Correndo", format_seconds(elapsed))
+        else:
+            ultimo = max(st.session_state.tempos.values(), default=0)
+            st.metric("Tempo Correndo", format_seconds(ultimo))
 
     st.divider()
 
@@ -92,15 +109,17 @@ elif menu == "Cronômetro":
                 if st.session_state.start_time:
                     tempo_final = time.time() - st.session_state.start_time
                     st.session_state.tempos[numero] = tempo_final
+                    salvar_csv()
                     atleta = next((a for a in st.session_state.alunos if a["Número"] == numero), None)
                     st.success(f"Tempo {format_seconds(tempo_final)} registrado para {numero} - {atleta['Nome'] if atleta else ''}")
     else:
         st.warning("Cadastre os alunos primeiro.")
 
     if st.session_state.tempos:
-        st.dataframe(pd.DataFrame([
+        tabela_tempos = [
             {"Número": num, "Tempo": format_seconds(t)} for num, t in st.session_state.tempos.items()
-        ]))
+        ]
+        st.dataframe(pd.DataFrame(tabela_tempos))
 
 # ============================================
 # Página: RANKING
@@ -124,12 +143,8 @@ elif menu == "Exportar":
     st.subheader("📤 Exportar dados (CSV)")
 
     if st.session_state.tempos:
-        df = pd.DataFrame(st.session_state.alunos)
-        df["Tempo (s)"] = df["Número"].map(st.session_state.tempos)
-        df = df.dropna().sort_values(by="Tempo (s)")
-        df["Tempo"] = df["Tempo (s)"].apply(format_seconds)
-
-        csv_bytes = df.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ Baixar CSV", data=csv_bytes, file_name="resultados_corre_nicea.csv", mime="text/csv")
+        if os.path.exists("resultados_corre_nicea.csv"):
+            with open("resultados_corre_nicea.csv", "rb") as f:
+                st.download_button("⬇️ Baixar CSV", data=f, file_name="resultados_corre_nicea.csv", mime="text/csv")
     else:
         st.info("Nenhum dado para exportar.")
