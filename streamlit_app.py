@@ -2,174 +2,178 @@ import streamlit as st
 import pandas as pd
 import time
 import os
-import av
-import cv2
-from pyzbar import pyzbar
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 
-# ===============================
-# CONFIGURAÇÃO WEBRTC (câmera)
-# ===============================
-RTC_CONFIGURATION = RTCConfiguration({
-    "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
-})
+# ============================================
+# Funções auxiliares
+# ============================================
+def format_seconds(seconds: float) -> str:
+    if seconds is None:
+        return "--:--.---"
+    m = int(seconds // 60)
+    s = int(seconds % 60)
+    ms = int((seconds - int(seconds)) * 1000)
+    return f"{m:02d}:{s:02d}.{ms:03d}"
 
-# ===============================
-# INICIALIZA SESSION STATE
-# ===============================
+
+def pad3(n: int) -> str:
+    return f"{n:03d}"
+
+
+def salvar_csv():
+    if st.session_state.tempos:
+        df = pd.DataFrame(st.session_state.alunos)
+        df["Tempo (s)"] = df["Número"].map(st.session_state.tempos)
+        df = df.dropna().sort_values(by="Tempo (s)")
+        df["Tempo"] = df["Tempo (s)"].apply(format_seconds)
+        df.to_csv("resultados_corre_nicea.csv", index=False, encoding="utf-8")
+
+# ============================================
+# Configuração inicial e persistência
+# ============================================
+st.set_page_config(page_title="1º CORRE NICÉA", layout="centered")
+
 if "alunos" not in st.session_state:
     st.session_state.alunos = []
 if "tempos" not in st.session_state:
     st.session_state.tempos = {}
-if "start_time" not in st.session_state:
-    st.session_state.start_time = None
 if "running" not in st.session_state:
     st.session_state.running = False
-
-# ===============================
-# FUNÇÕES AUXILIARES
-# ===============================
-def salvar_csv():
-    df = pd.DataFrame(st.session_state.alunos)
-    if st.session_state.tempos:
-        tempos_df = pd.DataFrame([
-            {"Número": num, "Tempo (s)": tempo}
-            for num, tempo in st.session_state.tempos.items()
-        ])
-        df = df.merge(tempos_df, on="Número", how="left")
-    df.to_csv("resultados_corrida.csv", index=False)
-
-def iniciar_corrida():
-    st.session_state.start_time = time.time()
-    st.session_state.running = True
-
-def resetar_tudo():
-    st.session_state.alunos = []
-    st.session_state.tempos = {}
+if "start_time" not in st.session_state:
     st.session_state.start_time = None
-    st.session_state.running = False
-    if os.path.exists("resultados_corrida.csv"):
-        os.remove("resultados_corrida.csv")
 
-# ===============================
-# INTERFACE PRINCIPAL
-# ===============================
-st.title("🏃‍♂️ 1º CORRE NICÉA - Organização da Corrida Escolar")
+st.title("🏃‍♂️ 1º CORRE NICÉA")
+menu = st.sidebar.radio("Navegação", ["Cadastro", "Cronômetro", "Ranking", "Exportar"], index=0)
 
-menu = st.sidebar.radio("Menu", ["Cadastro", "Cronômetro", "Chegada Manual", "Chegada QR", "Ranking", "Exportar"])
-
-# -------------------------------
-# CADASTRO DE ATLETAS
-# -------------------------------
+# ============================================
+# Página: CADASTRO
+# ============================================
 if menu == "Cadastro":
-    st.header("📋 Cadastro de Atletas")
+    st.subheader("📋 Cadastro dos alunos")
+
     with st.form("cadastro_form"):
         nome = st.text_input("Nome do aluno")
         turma = st.text_input("Turma")
         submitted = st.form_submit_button("Cadastrar")
 
-        if submitted and nome and turma:
-            numero = f"{len(st.session_state.alunos)+1:03d}"
-            st.session_state.alunos.append({"Número": numero, "Nome": nome, "Turma": turma})
-            salvar_csv()
-            st.success(f"✅ Atleta {nome} cadastrado com número {numero}")
+    if submitted and nome and turma:
+        numero = pad3(len(st.session_state.alunos) + 1)
+        st.session_state.alunos.append({
+            "Número": numero,
+            "Nome": nome.strip(),
+            "Turma": turma.strip()
+        })
+        salvar_csv()
+        st.success(f"Aluno {nome} cadastrado com número {numero}!")
 
     if st.session_state.alunos:
-        st.subheader("Atletas Cadastrados")
-        st.dataframe(pd.DataFrame(st.session_state.alunos))
+        st.dataframe(pd.DataFrame(st.session_state.alunos), use_container_width=True)
 
-# -------------------------------
-# CRONÔMETRO
-# -------------------------------
+# ============================================
+# Página: CRONÔMETRO
+# ============================================
 elif menu == "Cronômetro":
-    st.header("⏱️ Controle da Corrida")
-    if not st.session_state.running:
-        if st.button("Iniciar Corrida"):
-            iniciar_corrida()
+    st.subheader("⏱️ Cronômetro da Prova")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("▶️ Iniciar Corrida"):
+            st.session_state.start_time = time.time()
+            st.session_state.running = True
+    with col2:
+        if st.button("⏹️ Parar"):
+            st.session_state.running = False
+    with col3:
+        if st.button("🔁 Resetar Tudo"):
+            st.session_state.start_time = None
+            st.session_state.running = False
+            st.session_state.tempos = {}
+            st.session_state.alunos = []
+            if os.path.exists("resultados_corre_nicea.csv"):
+                os.remove("resultados_corre_nicea.csv")
+
+    if st.session_state.start_time:
+        if st.session_state.running:
+            elapsed = time.time() - st.session_state.start_time
+            st.metric("Tempo Correndo", format_seconds(elapsed))
+        else:
+            ultimo = max(st.session_state.tempos.values(), default=0)
+            st.metric("Tempo Correndo", format_seconds(ultimo))
+
+    st.divider()
+
+    if st.session_state.alunos:
+        numeros_disponiveis = [a["Número"] for a in st.session_state.alunos if a["Número"] not in st.session_state.tempos]
+        if numeros_disponiveis:
+            numero = st.selectbox("Número do atleta:", numeros_disponiveis)
+            if st.button("Registrar Tempo"):
+                if st.session_state.start_time:
+                    tempo_final = time.time() - st.session_state.start_time
+                    st.session_state.tempos[numero] = tempo_final
+                    salvar_csv()
+                    atleta = next((a for a in st.session_state.alunos if a["Número"] == numero), None)
+                    st.success(f"Tempo {format_seconds(tempo_final)} registrado para {numero} - {atleta['Nome'] if atleta else ''}")
     else:
-        tempo_atual = time.time() - st.session_state.start_time
-        st.metric("Tempo Decorrido", f"{tempo_atual:.2f} segundos")
-
-    if st.button("Resetar Tudo"):
-        resetar_tudo()
-        st.warning("⚠️ Todos os dados foram apagados!")
-
-# -------------------------------
-# CHEGADA MANUAL
-# -------------------------------
-elif menu == "Chegada Manual":
-    st.header("✍️ Registrar Chegada Manualmente")
-    atleta_numero = st.text_input("Número do atleta")
-    if st.button("Registrar Chegada"):
-        if atleta_numero and st.session_state.running:
-            tempo_corrida = time.time() - st.session_state.start_time
-            st.session_state.tempos[atleta_numero] = tempo_corrida
-            salvar_csv()
-            st.success(f"⏱️ Tempo registrado para atleta {atleta_numero}: {tempo_corrida:.2f}s")
+        st.warning("Cadastre os alunos primeiro.")
 
     if st.session_state.tempos:
-        df = pd.DataFrame([
-            {"Número": num, "Tempo (s)": tempo}
-            for num, tempo in st.session_state.tempos.items()
-        ]).sort_values("Tempo (s)")
-        st.subheader("Tempos Registrados")
-        st.dataframe(df)
+        tabela_tempos = [
+            {"Número": num, "Tempo": format_seconds(t)} for num, t in st.session_state.tempos.items()
+        ]
+        st.dataframe(pd.DataFrame(tabela_tempos))
 
-# -------------------------------
-# CHEGADA POR QR CODE
-# -------------------------------
-elif menu == "Chegada QR":
-    st.header("📷 Registrar Chegada via QR Code")
-
-    def video_frame_callback(frame):
-        img = frame.to_ndarray(format="bgr24")
-        qrcodes = pyzbar.decode(img)
-
-        for qr in qrcodes:
-            atleta_numero = qr.data.decode("utf-8").strip()
-            tempo_corrida = time.time() - st.session_state.start_time if st.session_state.start_time else 0
-
-            if atleta_numero not in st.session_state.tempos:
-                st.session_state.tempos[atleta_numero] = tempo_corrida
-                salvar_csv()
-                st.success(f"⏱️ Tempo registrado para atleta {atleta_numero}: {tempo_corrida:.2f}s")
-
-            (x, y, w, h) = qr.rect
-            cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            cv2.putText(img, atleta_numero, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-
-        return av.VideoFrame.from_ndarray(img, format="bgr24")
-
-    webrtc_streamer(
-        key="qr-scanner",
-        mode=WebRtcMode.RECVONLY,
-        rtc_configuration=RTC_CONFIGURATION,
-        video_frame_callback=video_frame_callback,
-        media_stream_constraints={"video": True, "audio": False},
-    )
-
-# -------------------------------
-# RANKING
-# -------------------------------
+# ============================================
+# Página: RANKING
+# ============================================
 elif menu == "Ranking":
-    st.header("🥇 Ranking Geral")
+    st.subheader("🏆 Ranking")
+
+    if st.session_state.tempos:
+        df = pd.DataFrame(st.session_state.alunos)
+        df["Tempo (s)"] = df["Número"].map(st.session_state.tempos)
+        df = df.dropna().sort_values(by="Tempo (s)")
+        df["Tempo"] = df["Tempo (s)"].apply(format_seconds)
+        st.dataframe(df)
+    else:
+        st.info("Nenhum tempo registrado ainda.")
+
+# ============================================
+# Página: EXPORTAR
+# ============================================
+elif menu == "Exportar":
+    st.subheader("📤 Exportar dados (CSV)")
+
+    if st.session_state.tempos:
+        if os.path.exists("resultados_corre_nicea.csv"):
+            with open("resultados_corre_nicea.csv", "rb") as f:
+                st.download_button("⬇️ Baixar CSV", data=f, file_name="resultados_corre_nicea.csv", mime="text/csv")
+    else:
+        st.info("Nenhum dado para exportar.")
+
+elif menu == "Chegada Painel":
+    st.header("🎛️ Registrar Chegada (Painel de Botões)")
+
+    if not st.session_state.running:
+        st.warning("⚠️ O cronômetro ainda não foi iniciado!")
+    else:
+        st.info("Clique no número do atleta quando ele cruzar a linha de chegada:")
+
+        # Mostra os botões organizados em grid
+        cols = st.columns(5)  # 5 botões por linha
+        for i, atleta in enumerate(st.session_state.alunos):
+            numero = atleta["Número"]
+            col = cols[i % 5]  # distribui em colunas
+            if col.button(numero):
+                if numero not in st.session_state.tempos:
+                    tempo_corrida = time.time() - st.session_state.start_time
+                    st.session_state.tempos[numero] = tempo_corrida
+                    salvar_csv()
+                    st.success(f"⏱️ Tempo registrado para atleta {numero}: {tempo_corrida:.2f}s")
+
     if st.session_state.tempos:
         df = pd.DataFrame([
             {"Número": num, "Tempo (s)": tempo}
             for num, tempo in st.session_state.tempos.items()
         ]).sort_values("Tempo (s)")
         df = df.merge(pd.DataFrame(st.session_state.alunos), on="Número", how="left")
-        df["Posição"] = range(1, len(df)+1)
-        st.dataframe(df[["Posição", "Número", "Nome", "Turma", "Tempo (s)"]])
-
-# -------------------------------
-# EXPORTAÇÃO
-# -------------------------------
-elif menu == "Exportar":
-    st.header("💾 Exportar Resultados")
-    if os.path.exists("resultados_corrida.csv"):
-        with open("resultados_corrida.csv", "rb") as f:
-            st.download_button("⬇️ Baixar CSV", f, file_name="resultados_corrida.csv")
-    else:
-        st.info("Ainda não há resultados para exportar.")
-
+        st.subheader("Tempos Registrados")
+        st.dataframe(df)
