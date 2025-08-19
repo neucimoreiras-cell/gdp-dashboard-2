@@ -148,3 +148,59 @@ elif menu == "Exportar":
                 st.download_button("⬇️ Baixar CSV", data=f, file_name="resultados_corre_nicea.csv", mime="text/csv")
     else:
         st.info("Nenhum dado para exportar.")
+import av
+import cv2
+import pandas as pd
+import streamlit as st
+from pyzbar import pyzbar
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+import time
+
+# Configuração WebRTC
+RTC_CONFIGURATION = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
+
+# Inicializa session_state
+if "tempos" not in st.session_state:
+    st.session_state.tempos = {}
+if "start_time" not in st.session_state:
+    st.session_state.start_time = None
+
+st.title("🏁 Chegada por QR Code")
+
+# Função para processar frames da câmera
+def video_frame_callback(frame):
+    img = frame.to_ndarray(format="bgr24")
+    qrcodes = pyzbar.decode(img)
+
+    for qr in qrcodes:
+        atleta_numero = qr.data.decode("utf-8").strip()
+        tempo_corrida = time.time() - st.session_state.start_time if st.session_state.start_time else 0
+
+        # Salva tempo apenas se ainda não registrado
+        if atleta_numero not in st.session_state.tempos:
+            st.session_state.tempos[atleta_numero] = tempo_corrida
+            st.success(f"⏱️ Tempo registrado para atleta {atleta_numero}: {tempo_corrida:.2f}s")
+
+        # Desenha retângulo no vídeo
+        (x, y, w, h) = qr.rect
+        cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        cv2.putText(img, atleta_numero, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+    return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+# Iniciar câmera
+webrtc_streamer(
+    key="qr-scanner",
+    mode=WebRtcMode.RECVONLY,
+    rtc_configuration=RTC_CONFIGURATION,
+    video_frame_callback=video_frame_callback,
+    media_stream_constraints={"video": True, "audio": False},
+)
+
+# Mostrar ranking parcial
+if st.session_state.tempos:
+    df = pd.DataFrame([
+        {"Número": num, "Tempo (s)": tempo}
+        for num, tempo in st.session_state.tempos.items()
+    ]).sort_values("Tempo (s)")
+    st.dataframe(df)
