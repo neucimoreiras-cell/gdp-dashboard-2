@@ -112,17 +112,15 @@ elif menu == "Exportar":
         st.dataframe(df)
 
         # Exportar para Excel usando BytesIO
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="Resultados")
-        excel_bytes = output.getvalue()
+       # Exportar para CSV sem openpyxl
+csv = df.to_csv(index=False).encode("utf-8")
+st.download_button(
+    "⬇️ Baixar CSV",
+    data=csv,
+    file_name="resultados_corre_nicea.csv",
+    mime="text/csv"
+)
 
-        st.download_button(
-            "⬇️ Baixar Excel",
-            data=excel_bytes,
-            file_name="resultados_corre_nicea.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
 
     else:
         st.warning("Nenhum dado disponível para exportar.")
